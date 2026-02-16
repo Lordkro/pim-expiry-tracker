@@ -1,0 +1,17 @@
+{
+  "bindings": [
+    {
+      "name": "Timer",
+      "type": "timerTrigger",
+      "direction": "in",
+      "schedule": "0 0 2 * * *"
+    },
+    {
+      "type": "eventGrid",
+      "direction": "out",
+      "name": "EventGridOutput",
+      "topicEndpointUri": "[environmentVariable('EVENT_GRID_TOPIC_URL')]",
+      "topicKeySetting": "EVENT_GRID_TOPIC_KEY"
+    }
+  ]
+}

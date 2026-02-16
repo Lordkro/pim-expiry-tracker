@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "functionAppName": {
+      "value": "pim-expiry-tracker"
+    },
+    "location": {
+      "value": "westeurope"
+    },
+    "eventGridTopicName": {
+      "value": "pim-expiry-topic"
+    },
+    "timerSchedule": {
+      "value": "0 0 2 * * *"
+    },
+    "thresholdDays": {
+      "value": 30
+    },
+    "applicationInsightsName": {
+      "value": "ai-pim-expiry-tracker"
+    }
+  }
+}
