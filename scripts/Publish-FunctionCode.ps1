@@ -40,10 +40,7 @@ finally {
 
 # Deploy
 Write-Host "Deploying zip to Function App '$FunctionAppName'..." -ForegroundColor Cyan
-az functionapp deployment source config-zip `
-    --resource-group $ResourceGroup `
-    --name $FunctionAppName `
-    --src $zipPath
+az functionapp deployment source config-zip --resource-group $ResourceGroup --name $FunctionAppName --src $zipPath
 
 if ($LASTEXITCODE -ne 0) { throw "Code deployment failed" }
 

@@ -108,10 +108,7 @@ Copy `infra/parameters.example.json` to `infra/parameters.json` and customise:
 ```powershell
 az login
 
-.\scripts\Deploy.ps1 `
-    -ResourceGroup   rg-pim-tracker `
-    -Location        westeurope `
-    -FunctionAppName pim-expiry-tracker-<client>
+.\scripts\Deploy.ps1 -ResourceGroup rg-pim-tracker -Location westeurope -FunctionAppName pim-expiry-tracker-<client>
 ```
 
 This will:
@@ -124,9 +121,7 @@ This will:
 Run as a **Global Admin** or **Privileged Role Administrator**:
 
 ```powershell
-.\scripts\Grant-GraphPermissions.ps1 `
-    -ManagedIdentityPrincipalId <principalId-from-output> `
-    -TenantId <tenant-id>
+.\scripts\Grant-GraphPermissions.ps1 -ManagedIdentityPrincipalId <principalId-from-output> -TenantId <tenant-id>
 ```
 
 > **Note:** Permissions may take a few minutes to propagate after assignment.
@@ -134,9 +129,7 @@ Run as a **Global Admin** or **Privileged Role Administrator**:
 ### 5. Deploy function code
 
 ```powershell
-.\scripts\Publish-FunctionCode.ps1 `
-    -FunctionAppName pim-expiry-tracker-<client> `
-    -ResourceGroup   rg-pim-tracker
+.\scripts\Publish-FunctionCode.ps1 -FunctionAppName pim-expiry-tracker-<client> -ResourceGroup rg-pim-tracker
 ```
 
 ### 6. Create Event Grid subscription
@@ -206,5 +199,3 @@ This template is designed to be deployed per client Azure subscription/tenant. U
 MIT
 
 ---
-
-**Built by Cass ⚡ for Lordkro**

@@ -38,22 +38,12 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to create resource group" }
 # Deploy infrastructure
 $deploymentName = "pim-tracker-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 Write-Host "Deploying infrastructure..." -ForegroundColor Cyan
-az deployment group create `
-    --resource-group $ResourceGroup `
-    --name $deploymentName `
-    --template-file infra\main.bicep `
-    --parameters "@$ParametersFile" `
-    --parameters functionAppName=$FunctionAppName location=$Location
-
+az deployment group create --resource-group $ResourceGroup --name $deploymentName --template-file infra\main.bicep --parameters "@$ParametersFile" --parameters functionAppName=$FunctionAppName location=$Location
 if ($LASTEXITCODE -ne 0) { throw "Infrastructure deployment failed" }
 
 # Fetch outputs
 Write-Host "Fetching deployment outputs..." -ForegroundColor Cyan
-$outputsJson = az deployment group show `
-    --resource-group $ResourceGroup `
-    --name $deploymentName `
-    --query properties.outputs `
-    -o json | ConvertFrom-Json
+$outputsJson = az deployment group show --resource-group $ResourceGroup --name $deploymentName --query properties.outputs -o json | ConvertFrom-Json
 
 $principalId   = $outputsJson.managedIdentityPrincipalId.value
 $topicEndpoint = $outputsJson.eventGridTopicEndpoint.value

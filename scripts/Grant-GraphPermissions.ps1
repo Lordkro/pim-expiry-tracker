@@ -58,11 +58,8 @@ foreach ($permName in $requiredPermissions) {
 
     # Assign the app role
     Write-Host "Assigning $permName to Managed Identity..." -ForegroundColor Yellow
-    New-MgServicePrincipalAppRoleAssignment `
-        -ServicePrincipalId $miSp.Id `
-        -PrincipalId $miSp.Id `
-        -ResourceId $graphSp.Id `
-        -AppRoleId $appRole.Id | Out-Null
+
+    New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $miSp.Id -PrincipalId $miSp.Id -ResourceId $graphSp.Id -AppRoleId $appRole.Id | Out-Null
 
     Write-Host "$permName — assigned" -ForegroundColor Green
 }
