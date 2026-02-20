@@ -1,0 +1,8 @@
+# Deployment artifacts
+function.zip
+
+# Local parameters (may contain client-specific values)
+infra/parameters.json
+
+# Azure Functions local development
+local.settings.json

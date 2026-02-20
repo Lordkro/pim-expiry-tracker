@@ -1,41 +1,62 @@
 # PIM Expiry Tracker
 
-Automated Azure Function that scans Privileged Identity Management (PIM) eligible role assignments and raises alerts for roles expiring soon. Deployable to client tenants via Bicep IaC.
+Automated Azure Function that scans Privileged Identity Management (PIM) eligible role assignments and alerts on roles expiring soon. Deployable to client tenants via Bicep IaC.
 
 ## Architecture
 
 ```
-Timer Trigger (daily 2 AM) → Azure Function (PowerShell)
+Timer Trigger (daily 2 AM UTC) → Azure Function (PowerShell 7.4)
    ↓
-Microsoft Graph API (Managed Identity auth)
+Microsoft Graph API (Managed Identity — no secrets)
    ↓
 Query: roleEligibilityScheduleInstances, users, role definitions
    ↓
-Filter by threshold (e.g., <30 days remaining)
+Filter by threshold (e.g., < 30 days remaining)
    ↓
-Publish events to Event Grid Topic
+Publish events to Event Grid Topic (output binding)
    ↓
 Event Grid subscription → Jira / ServiceNow / Webhook / Logic App
 ```
 
-## What it does
+## What It Does
 
-- Runs daily (configurable schedule)
-- Connects to Microsoft Graph using Managed Identity (no secrets)
-- Fetches all users in the tenant
+- Runs daily on a configurable schedule (CRON via app setting)
+- Connects to Microsoft Graph using **Managed Identity** (no secrets)
+- Fetches all users and builds a lookup by `principalId`
 - Fetches all eligible PIM role assignments (`/beta/roleManagement/directory/roleEligibilityScheduleInstances`)
-- Calculates days remaining until role expiry
-- Filters assignments where `DaysRemaining < threshold` (default: 30)
-- Publishes an Event Grid event for each expiring assignment
-- Event Grid can forward to Jira, ServiceNow, Teams, etc.
+- Calculates days remaining until each role assignment expires
+- Filters assignments where `DaysRemaining < ThresholdDays` (configurable, default: 30)
+- Publishes an Event Grid event per expiring assignment via output binding
+- Event Grid can forward to Jira, ServiceNow, Teams, Logic Apps, etc.
 
-## Output Event Grid Schema
+## Project Structure
+
+```
+pim-expiry-tracker/
+├── infra/                         # Infrastructure as Code
+│   ├── main.bicep                 # Bicep template (all Azure resources)
+│   └── parameters.example.json   # Example deployment parameters
+├── scripts/                       # Deployment & admin scripts
+│   ├── Deploy.ps1                 # End-to-end deployment (RG + Bicep)
+│   ├── Publish-FunctionCode.ps1   # Zip-deploy function code
+│   └── Grant-GraphPermissions.ps1 # Assign Graph API permissions to MI
+├── src/                           # Azure Function App code
+│   ├── host.json                  # Functions host configuration
+│   ├── profile.ps1                # PowerShell worker startup script
+│   ├── requirements.psd1          # Managed dependency modules
+│   └── Run/                       # Timer-triggered function
+│       ├── function.json          # Trigger & output bindings
+│       └── run.ps1                # Function entry point
+└── README.md
+```
+
+## Output Event Schema
 
 ```json
 {
   "id": "guid",
   "eventType": "PimRoleExpiringSoon",
-  "subject": "PIM Role Expiry: user@domain.com - Role Display Name",
+  "subject": "PIM Role Expiry: user@domain.com - Global Administrator",
   "eventTime": "2025-02-16T02:00:00Z",
   "data": {
     "CollectedAt": "2025-02-16T02:00:00Z",
@@ -51,10 +72,12 @@ Event Grid subscription → Jira / ServiceNow / Webhook / Logic App
 
 ## Prerequisites
 
-- Azure CLI / PowerShell with Az module
-- Tenant admin permissions to:
-  - Create resources (Function App, Storage, Event Grid Topic)
-  - Grant Managed Identity Graph permissions: `User.Read.All` and `RoleManagement.Read.All` (application permissions)
+- Azure CLI installed
+- An Azure subscription with permissions to create resources
+- **Global Admin** or **Privileged Role Administrator** to grant Graph API permissions
+- Required Graph application permissions (assigned to the Managed Identity):
+  - `User.Read.All`
+  - `RoleManagement.Read.All`
 
 ## Deployment
 
@@ -67,73 +90,62 @@ cd pim-expiry-tracker
 
 ### 2. Create parameters file
 
-Copy `parameters.example.json` to `parameters.json` and customize:
+Copy `infra/parameters.example.json` to `infra/parameters.json` and customise:
 
 ```json
 {
-  "functionAppName": "pim-expiry-tracker-<client>",
-  "location": "westeurope",
-  "eventGridTopicName": "pim-expiry-topic",
-  "timerSchedule": "0 0 2 * * *",
-  "thresholdDays": 30,
-  "applicationInsightsName": "ai-pim-expiry-tracker-<client>"
+  "functionAppName":          { "value": "pim-expiry-tracker-<client>" },
+  "location":                 { "value": "westeurope" },
+  "eventGridTopicName":       { "value": "pim-expiry-topic" },
+  "timerSchedule":            { "value": "0 0 2 * * *" },
+  "thresholdDays":            { "value": 30 },
+  "applicationInsightsName":  { "value": "ai-pim-expiry-tracker-<client>" }
 }
 ```
 
 ### 3. Deploy infrastructure
 
-```bash
+```powershell
 az login
-az group create --name rg-pim-tracker --location westeurope
 
-az deployment group create \
-  --resource-group rg-pim-tracker \
-  --template-file main.bicep \
-  --parameters @parameters.json
+.\scripts\Deploy.ps1 `
+    -ResourceGroup   rg-pim-tracker `
+    -Location        westeurope `
+    -FunctionAppName pim-expiry-tracker-<client>
 ```
 
-Output will include `managedIdentityPrincipalId`.
+This will:
+- Create the resource group (if it doesn't exist)
+- Deploy all Azure resources via Bicep
+- Output the Managed Identity principal ID for the next step
 
 ### 4. Grant Graph permissions to Managed Identity
 
-Run the helper script (must be executed by a Global Admin or Privileged Role Administrator):
+Run as a **Global Admin** or **Privileged Role Administrator**:
 
 ```powershell
-.\Grant-GraphPermissions.ps1 -ManagedIdentityPrincipalId <principalId-from-output> -TenantId <tenant-id>
+.\scripts\Grant-GraphPermissions.ps1 `
+    -ManagedIdentityPrincipalId <principalId-from-output> `
+    -TenantId <tenant-id>
 ```
 
-This assigns `User.Read.All` and `RoleManagement.Read.All` application permissions to the Managed Identity.
-
-**Note:** After assigning application permissions, they may take a few minutes to propagate.
+> **Note:** Permissions may take a few minutes to propagate after assignment.
 
 ### 5. Deploy function code
 
-```bash
-# Package the function
-func pack --csharp # if we had C#, but for PowerShell we just zip
-
-# From repo root:
-cd PimExpiryTracker
-zip -r ../function.zip *
-
-# Deploy
-az functionapp deployment source config-zip \
-  --resource-group rg-pim-tracker \
-  --name <functionAppName> \
-  --src ../function.zip
+```powershell
+.\scripts\Publish-FunctionCode.ps1 `
+    -FunctionAppName pim-expiry-tracker-<client> `
+    -ResourceGroup   rg-pim-tracker
 ```
 
-Alternatively, use `func azure functionapp publish <functionAppName>` if you have the Azure Functions Core Tools.
+### 6. Create Event Grid subscription
 
-### 6. Create Event Grid subscription to route to your ticketing system
+Route events to your ticketing system:
 
-In Azure Portal:
-- Go to the Event Grid Topic
-- Create a new subscription
-- Endpoint type: Webhook / Azure Function / Logic App / etc.
-- Point to your Jira/ServiceNow webhook URL
+**Azure Portal:** Event Grid Topic → + Event Subscription → choose endpoint type (Webhook, Logic App, etc.)
 
-Or use Azure CLI:
+**Azure CLI:**
 
 ```bash
 az eventgrid event-subscription create \
@@ -145,38 +157,45 @@ az eventgrid event-subscription create \
 
 ## Configuration
 
-- **TimerSchedule**: CRON expression (default: daily 2 AM UTC)
-- **ThresholdDays**: Alert if expiry within N days (default: 30)
-- Set these in `parameters.json` during deployment.
+| Setting | Description | Default |
+|---|---|---|
+| `TimerSchedule` | CRON expression for the timer trigger | `0 0 2 * * *` (daily 2 AM UTC) |
+| `ThresholdDays` | Alert if assignment expires within N days | `30` |
+
+Both are set via app settings during Bicep deployment (from `parameters.json`).
 
 ## Testing
 
-- Manually trigger the function: `az functionapp function run --name <app> --resource-group <rg> --function-name Run`
-- Check Application Insights for logs
-- Verify Event Grid events appear in the topic's metrics
+1. Manually trigger the function via the Azure Portal (Function App → Run → Test/Run)
+2. Check **Application Insights** → Live Metrics / Logs for execution output
+3. Verify events appear in the Event Grid Topic's metrics
 
 ## Cost Estimate (per tenant)
 
-- Function App (Consumption): ~$0-5/month depending on executions
-- Event Grid Topic: ~$0.60/month + operations
-- Storage: ~$0.10/month
-- Application Insights: ~$2-3/month
-- **Total**: ~$5-10/month per client
+| Resource | Estimated Cost |
+|---|---|
+| Function App (Consumption) | ~$0–5/month |
+| Event Grid Topic | ~$0.60/month + operations |
+| Storage Account | ~$0.10/month |
+| Application Insights | ~$2–3/month |
+| **Total** | **~$5–10/month** |
 
 ## Multi-Tenant Deployment
 
-This Bicep template is designed to be deployed into each client's Azure subscription/tenant. Use Azure Lighthouse or manual deployment as part of your managed services offering.
+This template is designed to be deployed per client Azure subscription/tenant. Use Azure Lighthouse or manual deployment as part of your managed services offering.
 
 ## Security
 
-- No secrets stored in code
-- Managed Identity for Azure resources
-- No service principals with long-lived credentials
-- Principle of least privilege: MI only has read access to Graph and write to Event Grid topic
+- **No secrets in code** — all auth via Managed Identity
+- **Managed Identity** for Graph API access and Storage Account access
+- **RBAC-based storage** — `AzureWebJobsStorage` uses identity-based connection (no storage keys for the Functions runtime)
+- **Least privilege** — MI only has read access to Graph and write access to Event Grid
+- **TLS 1.2 enforced** on storage account
+- **HTTPS only** on the Function App
 
 ## Roadmap
 
-- [ ] Support for Azure AD PIM for Azure resources (not just Azure AD roles)
+- [ ] Support for PIM for Azure resources (not just Entra ID roles)
 - [ ] Configurable filter by role type
 - [ ] Include role activation eligibility (not just assignment)
 - [ ] HTML email digest option
